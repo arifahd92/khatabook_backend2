@@ -1,3 +1,4 @@
+/*
 dotenv = require("dotenv")
 // require ("./mail/email")
 const maill=require("./mail/email")
@@ -131,3 +132,141 @@ app.post("/savedata",async (req,res)=>{
  app.listen(port,()=>{
  console.log(`listening at port ${port}`)
  })
+ */
+ const dotenv = require("dotenv");
+ const express = require("express");
+ const cors = require("cors");
+ const maill = require("./mail/email");
+ const Mydb = require("./model/khatamodel");
+ const { sendEmail } = require("./mail/email");
+ const connectDb=require("./db/connection")
+ 
+ dotenv.config();
+ const app = express();
+ const port = process.env.PORT || 4000;
+ 
+ app.use(express.json());
+ app.use(cors({
+   origin: '*',
+   credentials: true,
+   optionSuccessStatus: 200,
+ }));
+ 
+ // Send reminder email
+ app.get("/remind", async (req, res) => {
+   const currentDate = new Date().getTime();
+   console.log(currentDate);
+   const data = await Mydb.find();
+ 
+   for (const record of data) {
+     const paymentDate = new Date(record.paydate).getTime() + 43200100;
+ 
+     if (currentDate > paymentDate) {
+       const user = record.name;
+       const userEmail = record.gmail;
+       const leftAmount = record.amount;
+ 
+       if (+leftAmount < 0) {
+         const absoluteAmount = Math.abs(+leftAmount);
+         console.log(`Email sent to ${user}`);
+         sendEmail(userEmail, `Hey ${user}, please pay ${absoluteAmount} at Jimmy grocery shop as the last date has already passed`);
+       }
+     }
+   }
+ 
+   res.send("Email sent");
+ });
+ 
+ // Get customer data
+ app.get("/getcustomer", async (req, res) => {
+   const data = await Mydb.find();
+   res.send(data);
+ });
+ 
+ // Save and get todo
+ app.post("/savedata", async (req, res) => {
+   const { lastdate, type, amountval, gmail, val, phoneno } = req.body;
+   const amntToSave = type === "debit" ? -amountval : amountval;
+ 
+   try {
+     const existingName = await Mydb.findOne({ name: val });
+     const existingNumber = await Mydb.findOne({ phone: phoneno });
+ 
+     if (existingName) {
+       res.send(existingName);
+     } else if (existingNumber) {
+       res.send(existingNumber);
+     } else {
+       await sendEmail(gmail, `Hey ${val} at JimmyWell grocery store, an account has been created, and ${amntToSave} has been credited`);
+       const saveTodo = new Mydb({
+         name: val,
+         amount: amntToSave,
+         phone: phoneno,
+         gmail: gmail,
+         paytype: type,
+         paydate: lastdate,
+       });
+ 
+       await saveTodo.save();
+       const data = await Mydb.find();
+       res.send(data);
+     }
+   } catch (error) {
+     console.error(error);
+     res.status(500).send("Internal Server Error");
+   }
+ });
+ 
+ // Delete todo
+ app.post("/delete", async (req, res) => {
+   const { ind } = req.body;
+ 
+   try {
+     await Mydb.findByIdAndDelete({ _id: ind });
+     const data = await Mydb.find();
+     res.send(data);
+   } catch (error) {
+     console.error(error);
+     res.status(500).send("Internal Server Error");
+   }
+ });
+ 
+ // Update todo
+ app.post("/updatedatabcknd", async (req, res) => {
+   const { iid, val, amountval, phoneno, gmail, type, lastdate } = req.body;
+ 
+   try {
+     const dataa = await Mydb.findById(iid);
+     const savedAmount = parseInt(dataa.amount);
+     const newAmount = parseInt(amountval);
+ 
+     let totalAmount = type === "debit" ? savedAmount - newAmount : savedAmount + newAmount;
+ 
+     sendEmail(gmail, `Hey ${val} at JimmyWell grocery store, ${newAmount} has been ${type === "debit" ? "debited" : "credited"} from your account, and the total amount is ${totalAmount}`);
+ 
+     await Mydb.findByIdAndUpdate(iid, {
+       name: val,
+       amount: totalAmount,
+       phone: phoneno,
+       gmail: gmail,
+       type: type,
+       paydate: lastdate,
+       date: new Date(),
+     });
+ 
+     const data = await Mydb.find();
+     res.send(data);
+   } catch (error) {
+     console.error(error);
+     res.status(500).send("Internal Server Error");
+   }
+ });
+ 
+
+ connectDb().then(()=>{
+
+   app.listen(port, () => {
+     console.log(`connection success and listening at port ${port}`);
+   });
+ }).catch((err)=>console.log(err.message))
+ 
